@@ -1,9 +1,10 @@
 # インストールした discord.py を読み込む
+# py -3 -m pip install -U discord.py
 import discord
 import credentials.discord
-
-ID_CHANNEL_README = 648808489262645248
-ID_EMOJI_REACTION = '👍'
+import urllib.request
+import urllib.error
+import re
 
 # 接続に必要なオブジェクトを生成
 client = discord.Client()
@@ -14,25 +15,33 @@ async def on_ready():
     # 起動したらターミナルにログイン通知が表示される
     print('ログインしました')
 
+
 # メッセージ受信時に動作する処理
 @client.event
 async def on_message(message):
     # メッセージ送信者がBotだった場合は無視する
     if message.author.bot:
         return
-    # 「/neko」と発言したら「にゃーん」が返る処理
-    if message.content == '/neko':
-        await message.channel.send('にゃーん')
+    # 「/register」と発言したら絵文字が登録される処理
+    if message.content.startswith('/register '):
+        headers = {
+            "User-Agent":  "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)"}
+        custom_emojis = re.findall(r'<a?:\w*:\d*>', message.content)
+        custom_emojis = [(e.split(':')[1], int(e.split(':')[2].replace('>', '')))
+                        for e in custom_emojis]
+        # From now, `custom_emojis` is `list` of `discord.Emoji` that `msg` contains.
+        for (emojiname, emojiid) in custom_emojis:
+            try:
+                req = urllib.request.Request(
+                    f'https://cdn.discordapp.com/emojis/{emojiid}', None, headers)
+                contents = urllib.request.urlopen(req).read()
+                await message.guild.create_custom_emoji(name=emojiname, image=contents)
+            except discord.Forbidden as e:
+                await message.channel.send(f'Forbidden: {e}')
+            except discord.HTTPException as e:
+                await message.channel.send(f'HTTPException: {e}')
+        await message.channel.send('絵文字登録完了')
 
-@client.event
-async def on_raw_reaction_add(payload):  
-    channel = client.get_channel(payload.channel_id)  
-    if channel.id == ID_CHANNEL_README:  
-        guild = client.get_guild(payload.guild_id)  
-        member = guild.get_member(payload.user_id)  
-        emoji = payload.emoji
-        if emoji.is_unicode_emoji() and emoji.name == ID_EMOJI_REACTION:
-            await channel.send('rawリアクション' + member.name + ', ' + str(emoji.name))  
 
 # Botの起動とDiscordサーバーへの接続
 client.run(credentials.discord.TOKEN)
