@@ -28,7 +28,7 @@ async def on_message(message):
             await message.channel.send('絵文字登録中...')
             headers = {
                 "User-Agent":  "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)"}
-            custom_emojis = re.findall(r'<a?:\w*:\d*>', message.content)
+            custom_emojis = re.findall(r'<a?:\w+:\d+>', message.content)
             custom_emojis = [(e.split(':')[1], int(e.split(':')[2].replace('>', '')))
                             for e in custom_emojis]
             # From now, `custom_emojis` is `list` of `discord.Emoji` that `msg` contains.
