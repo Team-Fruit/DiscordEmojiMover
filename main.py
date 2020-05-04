@@ -4,6 +4,47 @@ import urllib.request
 import urllib.error
 import re
 import os
+from enum import Enum, auto
+from typing import Dict, List, Set, DefaultDict
+from collections import defaultdict
+
+
+# 絵文字ステータス
+class EmojiStatus(Enum):
+    PENDING = auto()
+    FULFILLED = auto()
+    REJECTED = auto()
+
+# 絵文字タスク
+class EmojiTask:
+    def __init__(self, name, url, *, status=EmojiStatus.PENDING, error=None, error_desc=None, done=None):
+        self.name = name
+        self.url = url
+        self.status = status
+        self.error = error
+        self.error_desc = error_desc
+        self.done = done
+
+    def complete(self, done):
+        self.status = EmojiStatus.FULFILLED
+        self.done = done
+
+    def fail(self, error, error_desc=None):
+        self.status = EmojiStatus.REJECTED
+        self.error = error
+        self.error_desc
+
+    @classmethod
+    def from_url(cls, name, url):
+        return cls(name, url)
+
+    @classmethod
+    def from_id(cls, name, id):
+        return cls(name, f'https://cdn.discordapp.com/emojis/{id}')
+
+
+processing_emojis: Set[str] = set()
+
 
 # 接続に必要なオブジェクトを生成
 client = discord.Client()
@@ -17,7 +58,7 @@ async def on_ready():
 
 # メッセージ受信時に動作する処理
 @client.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     # メッセージ送信者がBotだった場合は無視する
     if message.author.bot:
         return
@@ -61,54 +102,80 @@ async def on_message(message):
         'User-Agent': 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'
     }
 
-    start_message = await message.channel.send('<a:loading:513406664716845067>絵文字登録中...')
-    async with message.channel.typing():
-        # From now, `custom_emojis` is `list` of `discord.Emoji` that `msg` contains.
-        done_emojis = []
-        error_emojis = []
-        result_emojis = regex_emojis.finditer(message.content)
-        for match_emoji in result_emojis:
-            emoji_name = None
-            emoji_id = None
-            emoji_done = None
-            if match_emoji.group(1):
-                emoji_name, emoji_id = match_emoji.group(1), match_emoji.group(2)
-            elif match_emoji.group(3):
-                emoji_name, emoji_id = match_emoji.group(3), match_emoji.group(4)
-            elif match_emoji.group(5):
-                emoji_name, emoji_id = match_emoji.group(5), match_emoji.group(6)
-            if discord.utils.get(message.guild.emojis, name=emoji_name) is not None:
-                await message.channel.send(f'​　<:terminus:451694123779489792>`:{emoji_name}:`の名前は既に登録されているので登録されません')
-            else:
-                try:
-                    req = urllib.request.Request(
-                        f'https://cdn.discordapp.com/emojis/{emoji_id}', None, headers)
-                    contents = urllib.request.urlopen(req).read()
-                    emoji_done = await message.guild.create_custom_emoji(name=emoji_name, image=contents)
-                except discord.Forbidden as e:
-                    await message.channel.send(f'​　<:terminus:451694123779489792>Forbidden: {e}')
-                except discord.HTTPException as e:
-                    await message.channel.send(f'​　<:terminus:451694123779489792>HTTPException: {e}')
-                except Exception as e:
-                    await message.channel.send(f'​　<:terminus:451694123779489792>Exception: {e}')
-            if emoji_done is not None:
-                done_emojis.append(emoji_done)
-            else:
-                error_emojis.append(emoji_name)
+    # From now, `custom_emojis` is `list` of `discord.Emoji` that `msg` contains.
+    pending_emojis: Dict[str, EmojiTask] = {}
+    rejected_emojis: DefaultDict[str, List[EmojiTask]] = defaultdict(list)
+    result_emojis = regex_emojis.finditer(message.content)
+    for match_emoji in result_emojis:
+        emoji: EmojiTask = None
+        if match_emoji.group(1):
+            emoji = EmojiTask.from_id(match_emoji.group(1), match_emoji.group(2))
+        elif match_emoji.group(3):
+            emoji = EmojiTask.from_id(match_emoji.group(3), match_emoji.group(4))
+        elif match_emoji.group(5):
+            emoji = EmojiTask.from_id(match_emoji.group(5), match_emoji.group(6))
+
+        if emoji.name in pending_emojis:
+            continue
+
+        if emoji.name in processing_emojis or discord.utils.get(message.guild.emojis, name=emoji.name) is not None:
+            emoji.fail("既に登録されているため登録できません")
+
+        pending_emojis[emoji.name] = emoji
+        processing_emojis.add(emoji.name)
+
+        if emoji.status == EmojiStatus.REJECTED:
+            rejected_emojis[emoji.error].append(emoji)
 
     result_change_msgs = []
-    if done_emojis:
-        done_emojis_msg = [f'<:{emoji.name}:{emoji.id}>' for emoji in done_emojis]
-        done_emojis_msg = f'　追加: {"".join(done_emojis_msg)}'
-        result_change_msgs.append(done_emojis_msg)
-    if error_emojis:
-        error_emojis_msg = [f'`:{emoji}:`' for emoji in error_emojis]
-        error_emojis_msg = f'　失敗: {" ".join(error_emojis_msg)}'
-        result_change_msgs.append(error_emojis_msg)
+    if rejected_emojis:
+        result_change_msgs.append('失敗:')
+        for why, errors in rejected_emojis.items():
+            rejected_emojis_msg = [f'`:{error.name}:`' for error in errors]
+            result_change_msgs.append(f'  <:terminus:451694123779489792>{why}: {" ".join(rejected_emojis_msg)}')
+            for error in errors:
+                if error.error_desc is not None:
+                    result_change_msgs.append(f'    `{error.name}`: {error.error_desc}')
     await message.channel.send('​' + "\n".join(result_change_msgs))
+    
+    rejected_emojis.clear()
 
-    result_msg = '✅絵文字登録完了' if not error_emojis else '💥絵文字登録失敗'
-    await start_message.edit(content = f'{result_msg}')
+    if discord.utils.get(pending_emojis.values(), status=EmojiStatus.PENDING) is not None:
+        start_message = await message.channel.send('<a:loading:513406664716845067>絵文字登録中...')
+        async with message.channel.typing():
+            for emoji in pending_emojis.values():
+                if emoji.status == EmojiStatus.PENDING:
+                    try:
+                        req = urllib.request.Request(emoji.url, None, headers)
+                        contents = urllib.request.urlopen(req).read()
+                        emoji.complete(await message.guild.create_custom_emoji(name=emoji.name, image=contents))
+                    except discord.DiscordException as e:
+                        emoji.error('Discordエラー', e)
+                    except urllib.error.HTTPError as e:
+                        emoji.error('絵文字ダウンロードエラー', e)
+                    except Exception as e:
+                        emoji.error('不明なエラー', e)
+
+        result_change_msgs = []
+        done_emojis_msg = [f'{emoji.done}' for emoji in pending_emojis.values() if emoji.status == EmojiStatus.FULFILLED]
+        if done_emojis_msg:
+            result_change_msgs.append(f'追加: {"".join(done_emojis_msg)}')
+        if rejected_emojis:
+            result_change_msgs.append('失敗:')
+            for why, errors in rejected_emojis.items():
+                rejected_emojis_msg = [f'`:{error.name}:`' for error in errors]
+                result_change_msgs.append(f'  <:terminus:451694123779489792>{why}: {" ".join(rejected_emojis_msg)}')
+                for error in errors:
+                    if error.error_desc is not None:
+                        result_change_msgs.append(f'    `{error.name}`: {error.error_desc}')
+        if result_change_msgs:
+            await message.channel.send('​' + "\n".join(result_change_msgs))
+
+        result_msg = '✅絵文字登録完了' if discord.utils.get(pending_emojis.values(), status=EmojiStatus.REJECTED) is None else '💥絵文字登録失敗'
+        await start_message.edit(content = f'{result_msg}')
+    
+    for emoji in pending_emojis.values():
+        processing_emojis.remove(emoji.name)
 
 
 # Botの起動とDiscordサーバーへの接続
