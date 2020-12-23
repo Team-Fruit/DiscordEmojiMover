@@ -15,6 +15,7 @@ class EmojiStatus(Enum):
     FULFILLED = auto()
     REJECTED = auto()
 
+
 # 絵文字タスク
 class EmojiTask:
     def __init__(self, name, url, *, status=EmojiStatus.PENDING, error=None, error_desc=None, done=None):
@@ -45,9 +46,9 @@ class EmojiTask:
 
 processing_emojis: Set[str] = set()
 
-
 # 接続に必要なオブジェクトを生成
 client = discord.Client()
+
 
 # 起動時に動作する処理
 @client.event
@@ -66,18 +67,32 @@ async def on_message(message: discord.Message):
     # help
     if message.content == '/register' or message.content.startswith('/register help'):
         await message.channel.send(
-            embed = discord.Embed(
-                title = 'ℹ️ 使い方',
-                description =
-                    '`/register 絵文字` (Nitro専用)\n'
-                    '`/register <:名前:ID:>` (Nitro専用)\n'
-                    '`/register :名前:ID`\n'
-                    '`/register :名前:URL`\n'
-                    '※複数同時登録に対応しています\n'
-                    '※絵文字URL以外のURLには対応していません\n'
-                    '　　(セキュリティ上の観点から)'
+            embed=discord.Embed(
+                title='ℹ️ 使い方',
+                description=
+                '`/register 絵文字` (Nitro専用)\n'
+                '`/register <:名前:ID:>` (Nitro専用)\n'
+                '`/register :名前:ID`\n'
+                '`/register :名前:URL`\n'
+                '※複数同時登録に対応しています\n'
+                '※絵文字URL以外のURLには対応していません\n'
+                '　　(セキュリティ上の観点から)'
             )
         )
+        return
+
+    # 「/showreactions」と発言したらリアクションが羅列
+    if message.content.startswith('/showreactions'):
+        ref = message.reference
+        if ref is not None:
+            latest_msg = await message.channel.fetch_message(ref.message_id)
+            if not latest_msg.reactions:
+                await message.channel.send('リアクションがついていません')
+            else:
+                emojis = [f':{reaction.emoji.name}:{reaction.emoji.id}' for reaction in latest_msg.reactions]
+                await message.channel.send('絵文字 `' + " ".join(emojis) + '`')
+        else:
+            await message.channel.send('リアクション付きメッセージに返信する形で送信してください')
         return
 
     # 「/register」と発言したら絵文字が登録される処理
@@ -90,7 +105,8 @@ async def on_message(message: discord.Message):
         return
 
     # 絵文字パターン
-    regex_emojis = re.compile(r'(?:<a?:(\w+):(\d+)>)|(?::(\w+):https:\/\/cdn\.discordapp\.com\/emojis\/(\d+))|(?::(\w+):(\d+))')
+    regex_emojis = re.compile(
+        r'(?:<a?:(\w+):(\d+)>)|(?::(\w+):https:\/\/cdn\.discordapp\.com\/emojis\/(\d+))|(?::(\w+):(\d+))')
 
     # 絵文字確認
     if regex_emojis.search(message.content) is None:
@@ -137,7 +153,7 @@ async def on_message(message: discord.Message):
                 if error.error_desc is not None:
                     result_change_msgs.append(f'    `{error.name}`: {error.error_desc}')
     await message.channel.send('​' + "\n".join(result_change_msgs))
-    
+
     rejected_emojis.clear()
 
     if discord.utils.get(pending_emojis.values(), status=EmojiStatus.PENDING) is not None:
@@ -157,7 +173,8 @@ async def on_message(message: discord.Message):
                         emoji.error('不明なエラー', e)
 
         result_change_msgs = []
-        done_emojis_msg = [f'{emoji.done}' for emoji in pending_emojis.values() if emoji.status == EmojiStatus.FULFILLED]
+        done_emojis_msg = [f'{emoji.done}' for emoji in pending_emojis.values() if
+                           emoji.status == EmojiStatus.FULFILLED]
         if done_emojis_msg:
             result_change_msgs.append(f'追加: {"".join(done_emojis_msg)}')
         if rejected_emojis:
@@ -171,9 +188,10 @@ async def on_message(message: discord.Message):
         if result_change_msgs:
             await message.channel.send('​' + "\n".join(result_change_msgs))
 
-        result_msg = '✅絵文字登録完了' if discord.utils.get(pending_emojis.values(), status=EmojiStatus.REJECTED) is None else '💥絵文字登録失敗'
-        await start_message.edit(content = f'{result_msg}')
-    
+        result_msg = '✅絵文字登録完了' if discord.utils.get(pending_emojis.values(),
+                                                     status=EmojiStatus.REJECTED) is None else '💥絵文字登録失敗'
+        await start_message.edit(content=f'{result_msg}')
+
     for emoji in pending_emojis.values():
         processing_emojis.remove(emoji.name)
 
