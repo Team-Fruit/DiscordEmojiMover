@@ -1,2 +1,2 @@
 -e git+https://github.com/Rapptz/discord.py@eb11079569570ce991d9468ca40eb8fcf129e0be#egg=discord.py
-urllib3 == 1.26.2
+urllib3 == 1.26.3
